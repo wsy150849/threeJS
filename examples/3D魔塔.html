@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>3D 魔塔（攻击动画完整版 / ImportMap 修复版）</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        background: #111;
+        font-family: system-ui;
+      }
+      #ui {
+        position: fixed;
+        left: 10px;
+        top: 10px;
+        color: #fff;
+        background: rgba(0, 0, 0, 0.55);
+        padding: 10px 12px;
+        border-radius: 8px;
+        font-size: 14px;
+        line-height: 1.6;
+      }
+      #log {
+        position: fixed;
+        right: 10px;
+        top: 10px;
+        width: 240px;
+        height: 180px;
+        background: rgba(0, 0, 0, 0.55);
+        color: #0f0;
+        font-size: 12px;
+        padding: 8px;
+        overflow: auto;
+        border-radius: 8px;
+      }
+    </style>
+
+    <!-- 🔑 关键修复：Import Map 解决 three 模块解析失败 -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "../node_modules/three/build/three.module.js",
+          "three/addons/": "../node_modules/three/examples/jsm/",
+          "three/examples/jsm/": "../node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <div id="ui">
+      <div>❤️ HP: <span id="hp"></span></div>
+      <div>⚔️ ATK: <span id="atk"></span></div>
+      <div>🛡 DEF: <span id="def"></span></div>
+      <div>🔑 Key: <span id="key"></span></div>
+      <div>🏠 Floor: <span id="floor"></span></div>
+    </div>
+    <div id="log"></div>
+
+    <!-- 使用 ES Module（最终稳定方案） -->
+    <script type="module">
+      import * as THREE from "three";
+      import { StereoEffect } from "three/addons/effects/StereoEffect.js";
+
+      import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+
+      /* ================= 基础场景 ================= */
+      const scene = new THREE.Scene();
+      scene.background = new THREE.CubeTextureLoader()
+        .setPath("public/")
+        .load(["px.jpg", "nx.jpg", "py.jpg", "ny.jpg", "pz.jpg", "nz.jpg"]);
+
+      const spheres = [];
+      let mouseX = 0,
+        mouseY = 0;
+      let windowHalfX = window.innerWidth / 2;
+      let windowHalfY = window.innerHeight / 2;
+
+      document.addEventListener("mousemove", onDocumentMouseMove);
+
+      function onDocumentMouseMove(event) {
+        mouseX = (event.clientX - windowHalfX) * 0.01;
+        mouseY = (event.clientY - windowHalfY) * 0.01;
+      }
+      const camera = new THREE.PerspectiveCamera(
+        60,
+        innerWidth / innerHeight,
+        0.1,
+        1000,
+      );
+      camera.position.set(0, 12, 12);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(innerWidth, innerHeight);
+      document.body.appendChild(renderer.domElement);
+
+      let effect = new StereoEffect(renderer);
+      effect.setSize(window.innerWidth, window.innerHeight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+      dirLight.position.set(10, 20, 10);
+      scene.add(dirLight);
+      scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+
+      /* ================= UI ================= */
+      const logEl = document.getElementById("log");
+      const hpEl = document.getElementById("hp");
+      const atkEl = document.getElementById("atk");
+      const defEl = document.getElementById("def");
+      const keyEl = document.getElementById("key");
+      const floorEl = document.getElementById("floor");
+
+      function log(msg) {
+        logEl.innerHTML += msg + "<br>";
+        logEl.scrollTop = 9999;
+      }
+
+      /* ================= 玩家数据 ================= */
+      const player = { hp: 100, atk: 10, def: 5, key: 0, floor: 1, x: 1, z: 1 };
+
+      function updateUI() {
+        hpEl.textContent = player.hp;
+        atkEl.textContent = player.atk;
+        defEl.textContent = player.def;
+        keyEl.textContent = player.key;
+        floorEl.textContent = player.floor;
+      }
+
+      /* ================= 地图 ================= */
+      const TILE = 2;
+      const map = [
+        [1, 1, 1, 1, 1],
+        [1, 0, 2, 3, 1],
+        [1, 0, 1, 0, 1],
+        [1, 0, 4, 5, 1],
+        [1, 1, 1, 1, 1],
+      ];
+
+      const objects = new Map();
+
+      function drawMap() {
+        for (let z = 0; z < map.length; z++) {
+          for (let x = 0; x < map[z].length; x++) {
+            const base = new THREE.Mesh(
+              new THREE.BoxGeometry(TILE, 0.1, TILE),
+              new THREE.MeshStandardMaterial({ color: 0x333333 }),
+            );
+            base.position.set(x * TILE, 0.05, z * TILE);
+            scene.add(base);
+
+            let m;
+            if (map[z][x] === 1)
+              m = new THREE.Mesh(
+                new THREE.BoxGeometry(TILE, TILE, TILE),
+                new THREE.MeshStandardMaterial({ color: 0x666666 }),
+              );
+            if (map[z][x] === 2) m = createMonster();
+            if (map[z][x] === 3)
+              m = new THREE.Mesh(
+                new THREE.BoxGeometry(1, 0.5, 1),
+                new THREE.MeshStandardMaterial({ color: 0xffff00 }),
+              );
+            if (map[z][x] === 4)
+              m = new THREE.Mesh(
+                new THREE.BoxGeometry(TILE, TILE, TILE),
+                new THREE.MeshStandardMaterial({ color: 0x3333ff }),
+              );
+            if (map[z][x] === 5)
+              m = new THREE.Mesh(
+                new THREE.ConeGeometry(0.6, 1, 8),
+                new THREE.MeshStandardMaterial({ color: 0x00ffcc }),
+              );
+            if (m) {
+              m.position.set(x * TILE, TILE / 2, z * TILE);
+              scene.add(m);
+              objects.set(x + "," + z, m);
+            }
+          }
+        }
+      }
+
+      /* ================= 玩家模型 & 动画 ================= */
+      let playerMesh, mixer;
+      const actions = {};
+      let currentAction;
+
+      function loadPlayer() {
+        const loader = new GLTFLoader();
+        loader.load(
+          "models/Soldier.glb",
+          (gltf) => {
+            playerMesh = gltf.scene;
+            scene.add(playerMesh);
+
+            mixer = new THREE.AnimationMixer(playerMesh);
+            gltf.animations.forEach(
+              (clip) => (actions[clip.name] = mixer.clipAction(clip)),
+            );
+            setTimeout(() => playAnim("Idle"), 300);
+            syncPlayer();
+            log("玩家模型加载完成");
+          },
+          undefined,
+          (err) => {
+            console.error(err);
+            log("❌ 玩家模型加载失败");
+          },
+        );
+      }
+
+      function playAnim(name, loop = THREE.LoopRepeat) {
+        if (!actions[name]) return;
+        if (currentAction) currentAction.fadeOut(0.2);
+        currentAction = actions[name];
+        currentAction.reset();
+        currentAction.setLoop(loop);
+        currentAction.fadeIn(0.2).play();
+      }
+
+      function syncPlayer(dx = 0, dz = 0) {
+        if (playerMesh) {
+          playerMesh.position.set(player.x * TILE, 0, player.z * TILE);
+          if (dx !== 0 || dz !== 0) {
+            const angle = Math.atan2(-dx, -dz); // Z轴为前方向
+            playerMesh.rotation.y = angle;
+          }
+        }
+      }
+
+      /* ================= 怪物 ================= */
+      function createMonster() {
+        const m = new THREE.Mesh(
+          new THREE.SphereGeometry(0.7, 16, 16),
+          new THREE.MeshStandardMaterial({ color: 0xaa3333 }),
+        );
+        m.userData = { hp: 30, atk: 15, def: 5 };
+        return m;
+      }
+
+      function fight(monsterMesh) {
+        playAnim("Attack");
+        setTimeout(() => {
+          const m = monsterMesh.userData;
+          const pDmg = Math.max(1, player.atk - m.def);
+          const mDmg = Math.max(1, m.atk - player.def);
+          const rounds = Math.ceil(m.hp / pDmg);
+          const loss = (rounds - 1) * mDmg;
+          player.hp -= loss;
+          log(`战斗结束，损失 HP ${loss}`);
+          playAnim("Idle");
+          updateUI();
+        }, 600);
+      }
+
+      /* ================= 移动 ================= */
+      function tryMove(dx, dz) {
+        const nx = player.x + dx,
+          nz = player.z + dz;
+        const t = map[nz]?.[nx];
+        if (t == null || t === 1) return;
+
+        const obj = objects.get(nx + "," + nz);
+
+        if (t === 2) {
+          fight(obj);
+          scene.remove(obj);
+          map[nz][nx] = 0;
+        }
+        if (t === 3) {
+          player.key++;
+          scene.remove(obj);
+          map[nz][nx] = 0;
+          log("获得钥匙");
+        }
+        if (t === 4) {
+          if (player.key <= 0) return;
+          player.key--;
+          scene.remove(obj);
+          map[nz][nx] = 0;
+          log("开门");
+        }
+        if (t === 5) {
+          log("楼梯（Demo 结束）");
+        }
+
+        player.x = nx;
+        player.z = nz;
+        playAnim("Walk");
+        syncPlayer();
+        updateUI();
+        syncPlayer(dx, dz);
+      }
+
+      window.addEventListener("keydown", (e) => {
+        if (e.key === "w") tryMove(0, -1);
+        if (e.key === "s") tryMove(0, 1);
+        if (e.key === "a") tryMove(-1, 0);
+        if (e.key === "d") tryMove(1, 0);
+      });
+
+      /* ================= 主循环 ================= */
+      const clock = new THREE.Clock();
+      function loop() {
+        requestAnimationFrame(loop);
+        if (mixer) mixer.update(clock.getDelta());
+        if (playerMesh) {
+          const baseX = playerMesh.position.x;
+          const baseZ = playerMesh.position.z + 10;
+          const baseY = 12;
+          const targetX = baseX + mouseX;
+          const targetY = baseY - mouseY * 5;
+          camera.position.x += (targetX - camera.position.x) * 0.05;
+          camera.position.y += (targetY - camera.position.y) * 0.05;
+          camera.position.z = baseZ;
+          camera.lookAt(playerMesh.position);
+        }
+        effect.render(scene, camera);
+      }
+
+      drawMap();
+      loadPlayer();
+      updateUI();
+      loop();
+
+      addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+        effect.setSize(innerWidth, innerHeight);
+      });
+    </script>
+  </body>
+</html>
